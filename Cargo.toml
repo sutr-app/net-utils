@@ -67,8 +67,6 @@ tracing-subscriber = { version = "0.3", features = [
     "env-filter",
     "json",
 ] }
-
-#unicode-normalization = "0.1"
 url = "2"
 
 [dev-dependencies]

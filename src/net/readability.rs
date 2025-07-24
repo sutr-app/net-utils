@@ -6,7 +6,7 @@ use robotstxt::DefaultMatcher;
 use std::{borrow::BorrowMut, io::Cursor, time::Duration};
 use url::Url;
 
-use memory_utils::infra::memory::{MemoryCacheConfig, MemoryCacheImpl, UseMemoryCache};
+use memory_utils::cache::stretto::{MemoryCacheConfig, MemoryCacheImpl, UseMemoryCache};
 
 use super::{
     reqwest::ReqwestClient,
