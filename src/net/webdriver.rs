@@ -78,8 +78,8 @@ impl UseWebDriver for WebDriverWrapper {
 
 impl ChromeDriverFactory {
     // default value (for test)
-    // mac chrome
-    const USER_AGENT: &'static str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 12_5_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36";
+    // mac chrome - 最新のChrome版に更新してより自然に
+    const USER_AGENT: &'static str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
     const TIME_OUT: Duration = Duration::from_secs(5);
     const URL: &'static str = "http://localhost:9515";
 
@@ -92,36 +92,83 @@ impl ChromeDriverFactory {
         // caps.add_extension(Path::new("./adblock.crx"))?;
         // caps.add_arg("--window-size=1920,1080")?;
         caps.add_arg("start-maximized")?; // open Browser in maximized mode
-        caps.add_arg("enable-automation")?; // https://stackoverflow.com/a/43840128/1689770
-        caps.set_headless()?;
-        // caps.add_arg("--headless=new")?;
-
+        caps.add_arg("--headless=new")?;
         caps.add_arg("--no-sandbox")?; // Bypass OS security model // necessary in docker env
         caps.add_arg("--disable-dev-shm-usage")?; // if tab crash error occurred (add shm mem to container or this option turned on)
         caps.add_arg("--disable-browser-side-navigation")?; //https://stackoverflow.com/a/49123152/1689770"
         caps.add_arg("--disable-gpu")?;
-        // caps.set_disable_local_storage()?;
-        // https://stackoverflow.com/questions/48450594/selenium-timed-out-receiving-message-from-renderer
-        // https://stackoverflow.com/questions/51959986/how-to-solve-selenium-chromedriver-timed-out-receiving-message-from-renderer-exc
-        caps.add_arg("--disable-infobars")?; // disabling infobars
-                                             // caps.add_arg("--disable-extensions")?; // disabling extensions
-                                             //        caps.add_arg("--disk-cache=false")?;
-                                             //        caps.add_arg("--load-images=false")?;
-                                             //        caps.add_arg("--dns-prefetch-disable")?;
-                                             // stelth mode
-                                             // navigator.webdriver=false
 
+        // Renderer timeout対策
+        caps.add_arg("--disable-web-security")?; // セキュリティチェックを無効化（テスト環境用）
+        caps.add_arg("--disable-features=TranslateUI")?; // 翻訳機能を無効化
+        caps.add_arg("--disable-ipc-flooding-protection")?; // IPCフラッディング保護を無効化
+        caps.add_arg("--disable-renderer-backgrounding")?; // バックグラウンドレンダラーを無効化
+        caps.add_arg("--disable-backgrounding-occluded-windows")?; // オクルージョンによるバックグラウンド化を無効化
+        caps.add_arg("--disable-field-trial-config")?; // フィールドトライアル設定を無効化
+        caps.add_arg("--disable-back-forward-cache")?; // バックフォワードキャッシュを無効化
+        caps.add_arg("--disable-component-extensions-with-background-pages")?; // バックグラウンドページ付きコンポーネント拡張を無効化
+
+        // JavaScript実行の最適化
+        caps.add_arg("--max_old_space_size=4096")?; // V8メモリサイズを増加（パフォーマンス最適化のみ）
+        caps.add_arg("--js-flags=--max-old-space-size=4096")?; // JavaScriptエンジンのメモリ上限を増加（パフォーマンス最適化のみ）
+
+        // ネットワーク関連の最適化
+        caps.add_arg("--aggressive-cache-discard")?; // キャッシュを積極的に破棄
+        caps.add_arg("--disable-background-networking")?; // バックグラウンドネットワーキングを無効化
+        caps.add_arg("--disable-default-apps")?; // デフォルトアプリを無効化
+        caps.add_arg("--disable-sync")?; // 同期機能を無効化
+
+        // レンダリングプロセスの最適化
+        // --single-processは一部の環境で問題を起こす可能性があるため削除
+        // caps.add_arg("--single-process")?;
+        // caps.add_arg("--disable-plugins")?; // プラグインを無効化（パフォーマンス最適化）
+        // caps.add_arg("--disable-images")?; // 画像読み込みを無効化（パフォーマンス最適化）
+
+        // 追加の最適化オプション
+        caps.add_arg("--disable-logging")?; // ログ出力を無効化
+        caps.add_arg("--disable-metrics")?; // メトリクス収集を無効化
+        caps.add_arg("--disable-metrics-repo")?; // メトリクスレポートを無効化
+        caps.add_arg("--mute-audio")?; // 音声を無効化
+        caps.add_arg("--no-default-browser-check")?; // デフォルトブラウザチェックを無効化
+
+        caps.add_arg("--disable-hang-monitor")?; // ハングモニターを無効化
+        caps.add_arg("--disable-prompt-on-repost")?; // 再送信時のプロンプトを無効化
+        caps.add_arg("--disable-translate")?; // 翻訳機能を無効化
+        caps.add_arg("--disable-search-engine-choice-screen")?; // 検索エンジン選択画面を無効化
+        caps.add_arg("--use-mock-keychain")?; // モックキーチェーンを使用
+        caps.add_arg("--disable-component-update")?; // コンポーネント更新を無効化
+
+        caps.add_arg("--disable-infobars")?; // disabling infobars
         caps.add_arg("--disable-extensions")?;
         caps.add_arg("--dns-prefetch-disable")?;
 
         // https://stackoverflow.com/questions/53039551/selenium-webdriver-modifying-navigator-webdriver-flag-to-prevent-selenium-detec
         caps.add_arg("--disable-blink-features=AutomationControlled")?;
         caps.add_arg("--disable-browser-side-navigation")?;
-        // caps.add_arg("--incognito")?;
 
-        // caps.add_experimental_option("excludeSwitches", ["enable-automation"])?;
         caps.add_exclude_switch("enable-automation")?;
-        caps.add_experimental_option("useAutomationExtension", false)?;
+        // caps.add_experimental_option("useAutomationExtension", false)?; // deprecated - 削除
+
+        let prefs = serde_json::json!({
+            "credentials_enable_service": false,
+            "profile.password_manager_enabled": false,
+            "profile.default_content_setting_values.notifications": 2,
+            "profile.default_content_settings.popups": 0,
+            "profile.managed_default_content_settings.images": 2,
+            // WebRTC
+            "webrtc.ip_handling_policy": "disable_non_proxied_udp",
+            "webrtc.multiple_routes_enabled": false,
+            "webrtc.nonproxied_udp_enabled": false,
+            // メディア関連の設定
+            "profile.default_content_setting_values.media_stream_mic": 2,
+            "profile.default_content_setting_values.media_stream_camera": 2,
+            "profile.default_content_setting_values.geolocation": 2,
+            // プライバシー
+            "profile.default_content_setting_values.plugins": 2,
+            "profile.default_content_setting_values.ppapi_broker": 2,
+            "profile.default_content_setting_values.automatic_downloads": 2
+        });
+        caps.add_experimental_option("prefs", prefs)?;
 
         caps.add_arg(
             format!(
@@ -143,7 +190,6 @@ impl ChromeDriverFactory {
         // script_timeout: Duration,
         // user_agent: impl Into<String> + Sync,
     ) -> Result<Self, Box<WebDriverError>> {
-        tracing::info!("setup chrome driver: {:?}", config);
         let caps = Self::build_chrome_capabilities(config.user_agent.clone())?;
 
         Ok(Self {
@@ -158,15 +204,24 @@ impl ChromeDriverFactory {
             self.capabilities.clone(),
         )
         .await?;
-        driver
-            .set_page_load_timeout(self.config.page_load_timeout_sec.unwrap_or(Self::TIME_OUT))
-            .await?;
-        driver
-            .set_implicit_wait_timeout(self.config.page_load_timeout_sec.unwrap_or(Self::TIME_OUT))
-            .await?;
-        driver
-            .set_script_timeout(self.config.script_timeout_sec.unwrap_or(Self::TIME_OUT))
-            .await?;
+
+        // タイムアウト設定の詳細ログ
+        let page_load_timeout = self.config.page_load_timeout_sec.unwrap_or(Self::TIME_OUT);
+        let script_timeout = self.config.script_timeout_sec.unwrap_or(Self::TIME_OUT);
+
+        tracing::info!(
+            "Setting WebDriver timeouts - page_load: {:?}, script: {:?}",
+            page_load_timeout,
+            script_timeout
+        );
+
+        driver.set_page_load_timeout(page_load_timeout).await?;
+        driver.set_implicit_wait_timeout(page_load_timeout).await?;
+        driver.set_script_timeout(script_timeout).await?;
+
+        // タイムアウト設定が正しく適用されたかを確認
+        tracing::info!("WebDriver timeouts configured successfully");
+
         Ok(WebDriverWrapper { driver })
     }
 }
@@ -232,9 +287,31 @@ impl Manager for WebDriverManagerImpl {
     fn detach(&self, obj: &mut WebDriverWrapper) {
         tracing::info!("webdriver detached");
         let driver = obj.driver.clone();
-        tokio::spawn(async move {
-            let _ = driver.quit().await;
-        });
+
+        // 現在のTokioランタイムが利用可能な場合のみquit処理を実行
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                // quit処理にタイムアウトを設定して、無期限に待機することを防ぐ
+                let quit_result =
+                    tokio::time::timeout(Duration::from_secs(30), driver.quit()).await;
+                match quit_result {
+                    Ok(Ok(())) => {
+                        tracing::debug!("WebDriver quit successfully");
+                    }
+                    Ok(Err(e)) => {
+                        tracing::warn!("WebDriver quit failed: {:?}", e);
+                    }
+                    Err(_) => {
+                        tracing::warn!("WebDriver quit timeout after 10 seconds");
+                    }
+                }
+            });
+        } else {
+            // ランタイムが利用できない場合は警告のみ出力
+            tracing::warn!(
+                "Tokio runtime not available, WebDriver session may not be properly closed"
+            );
+        }
     }
 }
 pub trait UseWebDriverPool {
@@ -249,6 +326,7 @@ pub struct WebDriverPool {
     pub pool: Pool<WebDriverManagerImpl, Object<WebDriverManagerImpl>>,
     pub max_size: usize,
     pub user_agent: Option<String>,
+    pub config: WebDriverConfig,
 }
 impl WebDriverPool {
     pub async fn new(wd_config: WebDriverConfig) -> Self {
@@ -260,7 +338,8 @@ impl WebDriverPool {
                 .build()
                 .unwrap(),
             max_size: wd_config.pool_max_size,
-            user_agent: wd_config.user_agent,
+            user_agent: wd_config.user_agent.clone(),
+            config: wd_config,
         }
     }
     pub async fn get(&self) -> Result<Object<WebDriverManagerImpl>, WebDriverPoolError> {
