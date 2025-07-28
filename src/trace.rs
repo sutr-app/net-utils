@@ -7,7 +7,7 @@ use opentelemetry::{
     trace::{Span, Tracer},
     KeyValue,
 };
-use opentelemetry_otlp::tonic_types;
+// use opentelemetry_otlp::tonic_types;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use tonic::Request;
@@ -17,8 +17,11 @@ pub mod attr;
 pub mod impls;
 pub mod otel_span;
 
-struct MetadataMap<'a>(&'a tonic_types::metadata::MetadataMap);
-struct MetadataMutMap<'a>(&'a mut tonic_types::metadata::MetadataMap);
+// struct MetadataMap<'a>(&'a tonic_types::metadata::MetadataMap);
+// struct MetadataMutMap<'a>(&'a mut tonic_types::metadata::MetadataMap);
+
+struct MetadataMap<'a>(&'a tonic::metadata::MetadataMap);
+struct MetadataMutMap<'a>(&'a mut tonic::metadata::MetadataMap);
 
 // for server-side metadata extraction
 impl Extractor for MetadataMap<'_> {
