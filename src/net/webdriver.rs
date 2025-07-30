@@ -68,11 +68,24 @@ pub trait UseWebDriver {
 }
 pub struct WebDriverWrapper {
     driver: WebDriver,
+    created_at: std::time::Instant,
 }
 
 impl UseWebDriver for WebDriverWrapper {
     fn driver(&self) -> &WebDriver {
         &self.driver
+    }
+}
+
+impl WebDriverWrapper {
+    pub async fn is_session_healthy(&self) -> bool {
+        // Test session with lightweight WebDriver command
+        // If session is invalid, this will fail
+        self.driver.window().await.is_ok()
+    }
+    
+    pub fn created_at(&self) -> std::time::Instant {
+        self.created_at
     }
 }
 
@@ -222,7 +235,10 @@ impl ChromeDriverFactory {
         // タイムアウト設定が正しく適用されたかを確認
         tracing::info!("WebDriver timeouts configured successfully");
 
-        Ok(WebDriverWrapper { driver })
+        Ok(WebDriverWrapper { 
+            driver,
+            created_at: std::time::Instant::now(),
+        })
     }
 }
 
@@ -257,30 +273,16 @@ impl Manager for WebDriverManagerImpl {
         wrap: &mut WebDriverWrapper,
         _metrics: &Metrics,
     ) -> RecycleResult<WebDriverError> {
-        // 一度ページをロードした場合のみ有効 (作成直後で放置した場合はこれでは死活(quitしてないかどうか)判断できない)
-        //https://stackoverflow.com/a/46532764
-        match wrap.driver.title().await {
-            Ok(_title) => {
-                tracing::debug!("webdriver recycle (reuse): {:?}", _title);
-                // if session.is_empty() {
-                //     //セッションがない(detachがasyncじゃないのでここで念のためquit()しておく)
-                //     let quit = wrap.quit().await;
-                //     Err(RecycleError::Message(format!(
-                //         "session is empty, quit:{:?}",
-                //         quit
-                //     )))
-                // } else {
-                Ok(())
-                // }
-            }
-            Err(e) => {
-                // detachがasyncじゃないのでここで念のためquit()しておく
-                tracing::info!("webdriver recycle error (quit instance): {:?}", e);
-                let quit = wrap.quit().await;
-                Err(RecycleError::Message(Cow::Owned(format!(
-                    "error in getting session: {e:?}, quit: {quit:?}"
-                ))))
-            }
+        // Use improved session health check instead of title() method
+        if wrap.is_session_healthy().await {
+            tracing::debug!("webdriver recycle (reuse): session is healthy");
+            Ok(())
+        } else {
+            tracing::info!("webdriver recycle error: session is not healthy, quitting instance");
+            let quit = wrap.quit().await;
+            Err(RecycleError::Message(Cow::Owned(format!(
+                "session is not healthy, quit: {quit:?}"
+            ))))
         }
     }
 
@@ -293,7 +295,7 @@ impl Manager for WebDriverManagerImpl {
             handle.spawn(async move {
                 // quit処理にタイムアウトを設定して、無期限に待機することを防ぐ
                 let quit_result =
-                    tokio::time::timeout(Duration::from_secs(30), driver.quit()).await;
+                    tokio::time::timeout(Duration::from_secs(10), driver.quit()).await;
                 match quit_result {
                     Ok(Ok(())) => {
                         tracing::debug!("WebDriver quit successfully");
