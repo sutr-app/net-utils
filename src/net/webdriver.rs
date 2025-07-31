@@ -23,7 +23,7 @@ use thirtyfour::ChromeCapabilities;
 use super::reqwest::ReqwestClient;
 
 #[serde_as]
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct WebDriverConfig {
     pub url: Option<String>,
     pub user_agent: Option<String>,
@@ -38,6 +38,21 @@ pub struct WebDriverConfig {
     pub pool_timeout_create_sec: Option<Duration>,
     #[serde_as(as = "Option<DurationSeconds<f64>>")]
     pub pool_timeout_recycle_sec: Option<Duration>,
+}
+
+impl Default for WebDriverConfig {
+    fn default() -> Self {
+        Self {
+            url: None,
+            user_agent: None,
+            page_load_timeout_sec: Some(Duration::from_secs(30)),
+            script_timeout_sec: Some(Duration::from_secs(30)),
+            pool_max_size: 3, // Production recommended: limit concurrent sessions
+            pool_timeout_wait_sec: Some(Duration::from_secs(120)), // 2 minutes wait
+            pool_timeout_create_sec: Some(Duration::from_secs(60)), // 1 minute creation
+            pool_timeout_recycle_sec: Some(Duration::from_secs(30)), // 30 seconds recycle
+        }
+    }
 }
 
 pub trait UsePoolConfig {
@@ -83,7 +98,7 @@ impl WebDriverWrapper {
         // If session is invalid, this will fail
         self.driver.window().await.is_ok()
     }
-    
+
     pub fn created_at(&self) -> std::time::Instant {
         self.created_at
     }
@@ -235,7 +250,7 @@ impl ChromeDriverFactory {
         // タイムアウト設定が正しく適用されたかを確認
         tracing::info!("WebDriver timeouts configured successfully");
 
-        Ok(WebDriverWrapper { 
+        Ok(WebDriverWrapper {
             driver,
             created_at: std::time::Instant::now(),
         })
@@ -263,9 +278,34 @@ impl Manager for WebDriverManagerImpl {
     type Error = WebDriverError;
 
     async fn create(&self) -> Result<WebDriverWrapper, WebDriverError> {
-        // let current = self.connection_counter.fetch_add(1, Ordering::Relaxed);
-        let driver = self.web_driver_factory.create().await?;
-        Ok(driver)
+        // Retry mechanism for WebDriver creation to handle connection issues
+        const MAX_RETRIES: u32 = 3;
+        let mut last_error = None;
+
+        for attempt in 1..=MAX_RETRIES {
+            match self.web_driver_factory.create().await {
+                Ok(driver) => {
+                    if attempt > 1 {
+                        tracing::info!("WebDriver creation succeeded on attempt {}", attempt);
+                    }
+                    return Ok(driver);
+                }
+                Err(e) => {
+                    tracing::warn!("WebDriver creation attempt {} failed: {:?}", attempt, e);
+                    last_error = Some(e);
+
+                    if attempt < MAX_RETRIES {
+                        // Exponential backoff: 2^(attempt-1) seconds
+                        let delay_secs = 2_u64.pow(attempt - 1);
+                        tracing::info!("Retrying WebDriver creation in {} seconds...", delay_secs);
+                        tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+                    }
+                }
+            }
+        }
+
+        tracing::error!("WebDriver creation failed after {} attempts", MAX_RETRIES);
+        Err(last_error.unwrap())
     }
 
     async fn recycle(
@@ -346,6 +386,37 @@ impl WebDriverPool {
     }
     pub async fn get(&self) -> Result<Object<WebDriverManagerImpl>, WebDriverPoolError> {
         self.pool.get().await
+    }
+
+    pub async fn get_with_retry(
+        &self,
+        max_retries: usize,
+    ) -> Result<Object<WebDriverManagerImpl>, WebDriverPoolError> {
+        let mut last_error = None;
+
+        for attempt in 1..=max_retries {
+            match self.pool.get().await {
+                Ok(obj) => {
+                    if attempt > 1 {
+                        tracing::info!("WebDriver pool get succeeded on attempt {}", attempt);
+                    }
+                    return Ok(obj);
+                }
+                Err(e) => {
+                    tracing::warn!("WebDriver pool get attempt {} failed: {:?}", attempt, e);
+                    last_error = Some(e);
+
+                    if attempt < max_retries {
+                        let delay_secs = 2;
+                        tracing::info!("Retrying pool get in {} seconds...", delay_secs);
+                        tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+                    }
+                }
+            }
+        }
+
+        tracing::error!("WebDriver pool get failed after {} attempts", max_retries);
+        Err(last_error.unwrap())
     }
 }
 
