@@ -2,7 +2,6 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, FixedOffset};
 use command_utils::util::datetime;
-use command_utils::util::result::Flatten;
 use deadpool::managed::{
     Manager, Metrics, Object, Pool, PoolConfig, PoolError, RecycleError, RecycleResult, Timeouts,
 };
@@ -590,7 +589,7 @@ pub trait WebScraper: UseWebDriver + Send + Sync {
             tracing::error!("caught panic: {:?}", e);
             anyhow!("error in parsing datetime: {:?}", e)
         })
-        .flatten()
+        .and_then(|res| res)
     }
 
     async fn close(&self) -> Result<(), WebDriverError> {

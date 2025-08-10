@@ -54,7 +54,7 @@ impl GrpcConnection {
         Ok(())
     }
 
-    pub async fn read_channel(&self) -> RwLockReadGuard<tonic::transport::Channel> {
+    pub async fn read_channel(&self) -> RwLockReadGuard<'_, tonic::transport::Channel> {
         self.channel.read().await
     }
 }
