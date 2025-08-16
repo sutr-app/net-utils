@@ -1,12 +1,10 @@
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use async_trait::async_trait;
-use chrono::{DateTime, Datelike, FixedOffset};
-use command_utils::util::datetime;
+use chrono::{DateTime, FixedOffset};
 use deadpool::managed::{
     Manager, Metrics, Object, Pool, PoolConfig, PoolError, RecycleError, RecycleResult, Timeouts,
 };
 use deadpool::Runtime;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::DurationSeconds;
@@ -541,7 +539,6 @@ pub trait WebScraper: UseWebDriver + Send + Sync {
         // .flatten()
     }
 
-    #[allow(unstable_name_collisions)] // for flatten()
     async fn parse_datetime(
         &self,
         datetime_selector: By,
@@ -558,38 +555,7 @@ pub trait WebScraper: UseWebDriver + Send + Sync {
             None => datetime_element.text().await?,
         };
         tracing::info!("scraped datetime: {:?}", &dt_value);
-        std::panic::catch_unwind(move || {
-            let dt = match datetime_regex {
-                Some(fmt) if !fmt.is_empty() => {
-                    let now = datetime::now();
-                    Regex::new(fmt.as_str())
-                        .map(|dt_re| {
-                            dt_re.captures(dt_value.as_str()).and_then(|c| {
-                                // XXX 年月日、時分秒の順でマッチする前提
-                                datetime::ymdhms(
-                                    c.get(1).map_or(now.year(), |r| r.as_str().parse().unwrap()),
-                                    c.get(2).map_or(0u32, |r| r.as_str().parse().unwrap()),
-                                    c.get(3).map_or(0u32, |r| r.as_str().parse().unwrap()),
-                                    c.get(4).map_or(0u32, |r| r.as_str().parse().unwrap()),
-                                    c.get(5).map_or(0u32, |r| r.as_str().parse().unwrap()),
-                                    c.get(6).map_or(0u32, |r| r.as_str().parse().unwrap()),
-                                )
-                            })
-                        })
-                        .context("on parse by datetime regex")
-                }
-                _ => DateTime::parse_from_rfc3339(dt_value.as_str())
-                    .or_else(|_| DateTime::parse_from_str(dt_value.as_str(), "%+"))
-                    .map(Some)
-                    .context("on parse rf3339"),
-            };
-            dt
-        })
-        .map_err(|e| {
-            tracing::error!("caught panic: {:?}", e);
-            anyhow!("error in parsing datetime: {:?}", e)
-        })
-        .and_then(|res| res)
+        command_utils::util::datetime::parse_datetime_ymdhms(dt_value.as_str(), datetime_regex)
     }
 
     async fn close(&self) -> Result<(), WebDriverError> {
