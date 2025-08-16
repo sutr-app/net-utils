@@ -243,7 +243,7 @@ impl ChromeDriverFactory {
         );
 
         driver.set_page_load_timeout(page_load_timeout).await?;
-        driver.set_implicit_wait_timeout(page_load_timeout).await?;
+        // driver.set_implicit_wait_timeout(page_load_timeout).await?;
         driver.set_script_timeout(script_timeout).await?;
 
         // タイムアウト設定が正しく適用されたかを確認
