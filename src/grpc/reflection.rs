@@ -179,8 +179,16 @@ impl GrpcReflectionClient {
         tracing::debug!("Adding {} file descriptors to pool", file_descriptors.len());
 
         // Add all collected file descriptors to the pool
-        pool.add_file_descriptor_protos(file_descriptors)
-            .context("Failed to add file descriptors to pool")?;
+        if let Err(e) = pool.add_file_descriptor_protos(file_descriptors.clone()) {
+            tracing::error!("Failed to add file descriptors to pool: {}", e);
+            tracing::debug!("Collected {} file descriptors:", file_descriptors.len());
+            for (i, desc) in file_descriptors.iter().enumerate() {
+                let unnamed = "<unnamed>".to_string();
+                let name = desc.name.as_ref().unwrap_or(&unnamed);
+                tracing::debug!("  {}: {} (deps: {:?})", i, name, desc.dependency);
+            }
+            return Err(e).context("Failed to add file descriptors to pool");
+        }
 
         Ok(pool)
     }
@@ -270,60 +278,11 @@ impl GrpcReflectionClient {
                         file_descriptors.push(file_descriptor);
                     }
 
-                    // Resolve all dependencies first
-                    for dependency in new_dependencies {
-                        // Skip if already processed
-                        if processed_files.contains(&dependency) {
-                            continue;
-                        }
+                    // Resolve all dependencies iteratively until no new dependencies are found
+                    self.resolve_dependencies_iteratively(client, new_dependencies, file_descriptors, processed_files).await?;
 
-                        // Fetch the file descriptor for this dependency
-                        let descriptors = self.fetch_file_by_name(client, &dependency).await?;
-                        processed_files.insert(dependency.clone());
-
-                        // Add all descriptors to our collection
-                        for descriptor in descriptors {
-                            // Get nested dependencies before adding this descriptor
-                            let nested_deps: Vec<String> = descriptor.dependency.clone();
-
-                            // Add the descriptor to our collection
-                            file_descriptors.push(descriptor);
-
-                            // Process nested dependencies
-                            for nested_dep in nested_deps {
-                                if !processed_files.contains(&nested_dep) {
-                                    // Recursively resolve nested dependencies
-                                    let nested_descriptors =
-                                        self.fetch_file_by_name(client, &nested_dep).await?;
-                                    processed_files.insert(nested_dep.clone());
-
-                                    // Add all nested descriptors to our collection
-                                    file_descriptors.extend(nested_descriptors);
-                                }
-                            }
-                        }
-                    }
-
-                    // After all dependencies are resolved, try to extract additional symbols from the pool
-                    // to ensure complete resolution of nested types, enums, etc.
-                    let mut new_symbols = Vec::new();
-
-                    // Create a temporary pool to scan for additional symbols
-                    // This step helps find indirect dependencies through message fields.
-                    let mut temp_pool = DescriptorPool::new();
-
-                    // Try to add all descriptors we've collected so far to the temporary pool
-                    // Errors are expected here since we might not have all dependencies yet
-                    let file_descs_clone = file_descriptors.clone();
-                    let _ = temp_pool.add_file_descriptor_protos(file_descs_clone);
-
-                    // Just to be sure, check for any new message types in the temp pool that we haven't processed yet
-                    for message in temp_pool.all_messages() {
-                        let message_name = message.full_name();
-                        if !processed_symbols.contains(message_name) {
-                            new_symbols.push(message_name.to_string());
-                        }
-                    }
+                    // Extract and process additional symbols from temporary pool
+                    let new_symbols = self.extract_additional_symbols(file_descriptors, processed_symbols)?;
 
                     // Recursively process all new symbols
                     for symbol in new_symbols {
@@ -434,6 +393,12 @@ impl GrpcReflectionClient {
 
                 Ok(descriptors)
             } else if let Some(MessageResponse::ErrorResponse(error)) = response.message_response {
+                tracing::error!(
+                    "Server returned error for file '{}': {} (code: {})",
+                    file_name,
+                    error.error_message,
+                    error.error_code
+                );
                 Err(anyhow::anyhow!(
                     "Error response from server when fetching {}: {} (code: {})",
                     file_name,
@@ -446,11 +411,89 @@ impl GrpcReflectionClient {
                 ))
             }
         } else {
+            tracing::error!("No response from reflection API for file '{}'", file_name);
             Err(anyhow::anyhow!(
                 "No response from server when fetching {}",
                 file_name
             ))
         }
+    }
+
+    /// Iteratively resolve dependencies until all are fetched
+    async fn resolve_dependencies_iteratively(
+        &self,
+        client: &mut ServerReflectionClient<tonic::transport::Channel>,
+        initial_dependencies: Vec<String>,
+        file_descriptors: &mut Vec<FileDescriptorProto>,
+        processed_files: &mut std::collections::HashSet<String>,
+    ) -> Result<()> {
+        let mut dependencies_to_process = initial_dependencies;
+        let mut iteration = 0;
+        const MAX_ITERATIONS: usize = 30; // Prevent infinite loops
+
+        while !dependencies_to_process.is_empty() && iteration < MAX_ITERATIONS {
+            iteration += 1;
+            let mut next_round_dependencies = Vec::new();
+
+            for dependency in dependencies_to_process {
+                // Skip if already processed
+                if processed_files.contains(&dependency) {
+                    continue;
+                }
+
+                // Fetch the file descriptor for this dependency
+                let descriptors = self.fetch_file_by_name(client, &dependency).await?;
+                processed_files.insert(dependency.clone());
+
+                // Add all descriptors to our collection and collect their dependencies
+                for descriptor in descriptors {
+                    // Add the descriptor to our collection first
+                    file_descriptors.push(descriptor.clone());
+
+                    // Collect dependencies from this descriptor for the next iteration
+                    for nested_dep in &descriptor.dependency {
+                        if !processed_files.contains(nested_dep) && !next_round_dependencies.contains(nested_dep) {
+                            next_round_dependencies.push(nested_dep.clone());
+                        }
+                    }
+                }
+            }
+
+            dependencies_to_process = next_round_dependencies;
+        }
+
+        if iteration >= MAX_ITERATIONS && !dependencies_to_process.is_empty() {
+            tracing::warn!("Reached maximum iteration limit ({}) with {} unresolved dependencies: {:?}",
+                         MAX_ITERATIONS, dependencies_to_process.len(), dependencies_to_process);
+        }
+
+        Ok(())
+    }
+
+    /// Extract additional symbols from a temporary descriptor pool
+    fn extract_additional_symbols(
+        &self,
+        file_descriptors: &[FileDescriptorProto],
+        processed_symbols: &std::collections::HashSet<String>,
+    ) -> Result<Vec<String>> {
+        let mut new_symbols = Vec::new();
+
+        // Create a temporary pool to scan for additional symbols
+        let mut temp_pool = DescriptorPool::new();
+
+        // Try to add all descriptors we've collected so far to the temporary pool
+        // Errors are expected here since we might not have all dependencies yet
+        if temp_pool.add_file_descriptor_protos(file_descriptors.to_vec()).is_ok() {
+            // Check for any new message types in the temp pool that we haven't processed yet
+            for message in temp_pool.all_messages() {
+                let message_name = message.full_name();
+                if !processed_symbols.contains(message_name) {
+                    new_symbols.push(message_name.to_string());
+                }
+            }
+        }
+
+        Ok(new_symbols)
     }
 
     /// Parse a JSON message into bytes using reflection
@@ -1277,6 +1320,107 @@ mod tests {
             final_files,
             final_cache_size
         );
+
+        Ok(())
+    }
+
+    /// Test nested dependency resolution for complex protobuf structures
+    /// This test specifically targets the case where dependencies have their own dependencies
+    /// that need to be recursively resolved (like rss_item.proto -> rss_channel.proto)
+    #[tokio::test]
+    #[ignore]
+    async fn test_nested_dependency_resolution() -> Result<()> {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        // Connect to the gRPC server that has nested dependencies
+        let client = GrpcReflectionClient::new("http://localhost:9010".to_string(), None)
+            .await
+            .context("Failed to create reflection client")?;
+
+        tracing::info!("Testing nested dependency resolution with complex proto structure");
+
+        // Test with a service that has nested dependencies
+        // Based on the log output, rss_item.proto depends on rss_channel.proto
+        // but rss_channel.proto is not being fetched properly
+        let service_name = "news_aggregator.service.RssItemService";
+
+        tracing::info!("Attempting to resolve service: {}", service_name);
+
+        let result = client.get_service_with_dependencies(service_name).await;
+
+        match result {
+            Ok(pool) => {
+                tracing::info!("Successfully resolved nested dependencies");
+
+                // Verify that all necessary types are available in the pool
+                let service = pool.get_service_by_name(service_name)
+                    .ok_or_else(|| anyhow::anyhow!("Service {} not found in pool", service_name))?;
+
+                tracing::info!("Service {} found with {} methods", service_name, service.methods().count());
+
+                // Try to find some expected message types that should be available
+                // if dependencies were resolved correctly
+                let rss_item_data = pool.get_message_by_name("news_aggregator.data.RssItemData");
+                let rss_channel_data = pool.get_message_by_name("news_aggregator.data.RssChannelData");
+
+                if rss_item_data.is_some() && rss_channel_data.is_some() {
+                    tracing::info!("✓ All expected message types found - nested dependencies resolved correctly");
+                } else {
+                    tracing::warn!("Some expected message types missing:");
+                    if rss_item_data.is_none() {
+                        tracing::warn!("  - news_aggregator.data.RssItemData not found");
+                    }
+                    if rss_channel_data.is_none() {
+                        tracing::warn!("  - news_aggregator.data.RssChannelData not found");
+                    }
+                    return Err(anyhow::anyhow!("Nested dependency resolution incomplete"));
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to resolve nested dependencies: {}", e);
+                return Err(e).context("Nested dependency resolution test failed");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Test that specifically reproduces the rss_channel.proto dependency issue
+    #[tokio::test]
+    #[ignore]
+    async fn test_rss_channel_dependency_resolution() -> Result<()> {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let client = GrpcReflectionClient::new("http://localhost:9010".to_string(), None)
+            .await
+            .context("Failed to create reflection client")?;
+
+        tracing::info!("Testing specific rss_channel.proto dependency resolution");
+
+        // Test with LinkScrapingStatusService which was failing in the logs
+        let service_name = "news_aggregator.service.LinkScrapingStatusService";
+
+        tracing::info!("Attempting to resolve service: {}", service_name);
+
+        let result = client.get_service_with_dependencies(service_name).await;
+
+        // This should fail with the current implementation due to missing rss_channel.proto
+        match result {
+            Ok(_) => {
+                tracing::info!("✓ Successfully resolved all dependencies including rss_channel.proto");
+            }
+            Err(e) => {
+                let error_msg = format!("{}", e);
+                if error_msg.contains("news_aggregator/data/rss_channel.proto") {
+                    tracing::error!("✗ Expected failure: rss_channel.proto dependency not resolved");
+                    tracing::error!("Error: {}", e);
+                    return Err(e).context("rss_channel.proto dependency resolution failed as expected");
+                } else {
+                    tracing::error!("Unexpected error: {}", e);
+                    return Err(e).context("Unexpected error during dependency resolution");
+                }
+            }
+        }
 
         Ok(())
     }
