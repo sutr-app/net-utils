@@ -279,10 +279,17 @@ impl GrpcReflectionClient {
                     }
 
                     // Resolve all dependencies iteratively until no new dependencies are found
-                    self.resolve_dependencies_iteratively(client, new_dependencies, file_descriptors, processed_files).await?;
+                    self.resolve_dependencies_iteratively(
+                        client,
+                        new_dependencies,
+                        file_descriptors,
+                        processed_files,
+                    )
+                    .await?;
 
                     // Extract and process additional symbols from temporary pool
-                    let new_symbols = self.extract_additional_symbols(file_descriptors, processed_symbols)?;
+                    let new_symbols =
+                        self.extract_additional_symbols(file_descriptors, processed_symbols)?;
 
                     // Recursively process all new symbols
                     for symbol in new_symbols {
@@ -452,7 +459,9 @@ impl GrpcReflectionClient {
 
                     // Collect dependencies from this descriptor for the next iteration
                     for nested_dep in &descriptor.dependency {
-                        if !processed_files.contains(nested_dep) && !next_round_dependencies.contains(nested_dep) {
+                        if !processed_files.contains(nested_dep)
+                            && !next_round_dependencies.contains(nested_dep)
+                        {
                             next_round_dependencies.push(nested_dep.clone());
                         }
                     }
@@ -463,8 +472,12 @@ impl GrpcReflectionClient {
         }
 
         if iteration >= MAX_ITERATIONS && !dependencies_to_process.is_empty() {
-            tracing::warn!("Reached maximum iteration limit ({}) with {} unresolved dependencies: {:?}",
-                         MAX_ITERATIONS, dependencies_to_process.len(), dependencies_to_process);
+            tracing::warn!(
+                "Reached maximum iteration limit ({}) with {} unresolved dependencies: {:?}",
+                MAX_ITERATIONS,
+                dependencies_to_process.len(),
+                dependencies_to_process
+            );
         }
 
         Ok(())
@@ -483,7 +496,10 @@ impl GrpcReflectionClient {
 
         // Try to add all descriptors we've collected so far to the temporary pool
         // Errors are expected here since we might not have all dependencies yet
-        if temp_pool.add_file_descriptor_protos(file_descriptors.to_vec()).is_ok() {
+        if temp_pool
+            .add_file_descriptor_protos(file_descriptors.to_vec())
+            .is_ok()
+        {
             // Check for any new message types in the temp pool that we haven't processed yet
             for message in temp_pool.all_messages() {
                 let message_name = message.full_name();
@@ -1353,15 +1369,21 @@ mod tests {
                 tracing::info!("Successfully resolved nested dependencies");
 
                 // Verify that all necessary types are available in the pool
-                let service = pool.get_service_by_name(service_name)
+                let service = pool
+                    .get_service_by_name(service_name)
                     .ok_or_else(|| anyhow::anyhow!("Service {} not found in pool", service_name))?;
 
-                tracing::info!("Service {} found with {} methods", service_name, service.methods().count());
+                tracing::info!(
+                    "Service {} found with {} methods",
+                    service_name,
+                    service.methods().count()
+                );
 
                 // Try to find some expected message types that should be available
                 // if dependencies were resolved correctly
                 let rss_item_data = pool.get_message_by_name("news_aggregator.data.RssItemData");
-                let rss_channel_data = pool.get_message_by_name("news_aggregator.data.RssChannelData");
+                let rss_channel_data =
+                    pool.get_message_by_name("news_aggregator.data.RssChannelData");
 
                 if rss_item_data.is_some() && rss_channel_data.is_some() {
                     tracing::info!("✓ All expected message types found - nested dependencies resolved correctly");
@@ -1407,14 +1429,19 @@ mod tests {
         // This should fail with the current implementation due to missing rss_channel.proto
         match result {
             Ok(_) => {
-                tracing::info!("✓ Successfully resolved all dependencies including rss_channel.proto");
+                tracing::info!(
+                    "✓ Successfully resolved all dependencies including rss_channel.proto"
+                );
             }
             Err(e) => {
                 let error_msg = format!("{}", e);
                 if error_msg.contains("news_aggregator/data/rss_channel.proto") {
-                    tracing::error!("✗ Expected failure: rss_channel.proto dependency not resolved");
+                    tracing::error!(
+                        "✗ Expected failure: rss_channel.proto dependency not resolved"
+                    );
                     tracing::error!("Error: {}", e);
-                    return Err(e).context("rss_channel.proto dependency resolution failed as expected");
+                    return Err(e)
+                        .context("rss_channel.proto dependency resolution failed as expected");
                 } else {
                     tracing::error!("Unexpected error: {}", e);
                     return Err(e).context("Unexpected error during dependency resolution");
