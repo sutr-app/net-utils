@@ -24,7 +24,11 @@ http = "1"
 once_cell = "1.19"
 opentelemetry = { version = "0.30", features = ["metrics", "trace"] }
 opentelemetry_sdk = { version = "0.30", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.30", default-features = false, features = ["grpc-tonic", "metrics", "reqwest-rustls"] }
+opentelemetry-otlp = { version = "0.30", default-features = false, features = [
+    "grpc-tonic",
+    "metrics",
+    "reqwest-rustls",
+] }
 opentelemetry-semantic-conventions = { version = "0.30", features = [
     "semconv_experimental",
 ] }
@@ -34,10 +38,18 @@ prost-reflect = { version = "0.16", features = ["serde"] }
 rand = "0.9"
 readability = { version = "0.3", default-features = false }
 regex = "1.7"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
-reqwest-middleware = { version = "0.4", default-features = false, features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+    "stream",
+] }
+reqwest-middleware = { version = "0.4", default-features = false, features = [
+    "json",
+] }
 reqwest-retry = { version = "0.7", default-features = false }
-reqwest-tracing = { version = "0.5", default-features = false, features = ["opentelemetry_0_29"] }
+reqwest-tracing = { version = "0.5", default-features = false, features = [
+    "opentelemetry_0_29",
+] }
 robotstxt = { version = "0.3", default-features = false }
 rss = { version = "2.0", default-features = false }
 rustls = { version = "0.23", features = ["ring"] } # redis rustls
@@ -47,8 +59,10 @@ serde_derive = "1.0"
 serde_with = "3.0"
 strum = "0.27"
 strum_macros = "0.27"
-thirtyfour = { git = "https://github.com/sutr-app/thirtyfour.git", branch = "main", default-features = false, features = ["rustls-tls"] }
-#thirtyfour = { version = "0.34" }
+#thirtyfour = { git = "https://github.com/sutr-app/thirtyfour.git", branch = "main", default-features = false, features = ["rustls-tls"] }
+thirtyfour = { version = "0.36.0", default-features = false, features = [
+    "rustls-tls",
+] }
 tonic = { version = "0.14", features = ["tls-ring", "tls-webpki-roots"] }
 tonic-reflection = { version = "0.14" }
 tonic-web = { version = "0.14" }
