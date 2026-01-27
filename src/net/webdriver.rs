@@ -1,21 +1,21 @@
 use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset};
+use deadpool::Runtime;
 use deadpool::managed::{
     Manager, Metrics, Object, Pool, PoolConfig, PoolError, RecycleError, RecycleResult, Timeouts,
 };
-use deadpool::Runtime;
 use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
 use serde_with::DurationSeconds;
+use serde_with::serde_as;
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 use strum::{self, IntoEnumIterator};
 use strum_macros::{self, EnumIter};
+use thirtyfour::ChromeCapabilities;
 use thirtyfour::prelude::*;
 use thirtyfour::session::http::HttpClient;
-use thirtyfour::ChromeCapabilities;
 
 use super::reqwest::ReqwestClient;
 
@@ -328,28 +328,31 @@ impl Manager for WebDriverManagerImpl {
         let driver = obj.driver.clone();
 
         // 現在のTokioランタイムが利用可能な場合のみquit処理を実行
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
-                // quit処理にタイムアウトを設定して、無期限に待機することを防ぐ
-                let quit_result =
-                    tokio::time::timeout(Duration::from_secs(10), driver.quit()).await;
-                match quit_result {
-                    Ok(Ok(())) => {
-                        tracing::debug!("WebDriver quit successfully");
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.spawn(async move {
+                    // quit処理にタイムアウトを設定して、無期限に待機することを防ぐ
+                    let quit_result =
+                        tokio::time::timeout(Duration::from_secs(10), driver.quit()).await;
+                    match quit_result {
+                        Ok(Ok(())) => {
+                            tracing::debug!("WebDriver quit successfully");
+                        }
+                        Ok(Err(e)) => {
+                            tracing::warn!("WebDriver quit failed: {:?}", e);
+                        }
+                        Err(_) => {
+                            tracing::warn!("WebDriver quit timeout after 10 seconds");
+                        }
                     }
-                    Ok(Err(e)) => {
-                        tracing::warn!("WebDriver quit failed: {:?}", e);
-                    }
-                    Err(_) => {
-                        tracing::warn!("WebDriver quit timeout after 10 seconds");
-                    }
-                }
-            });
-        } else {
-            // ランタイムが利用できない場合は警告のみ出力
-            tracing::warn!(
-                "Tokio runtime not available, WebDriver session may not be properly closed"
-            );
+                });
+            }
+            _ => {
+                // ランタイムが利用できない場合は警告のみ出力
+                tracing::warn!(
+                    "Tokio runtime not available, WebDriver session may not be properly closed"
+                );
+            }
         }
     }
 }

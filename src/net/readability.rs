@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use command_utils::util::encoding;
 use readability::extractor::Product;
 use reqwest::{self, StatusCode};

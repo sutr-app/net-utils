@@ -4,15 +4,15 @@ use command_utils::protobuf::ProtobufDescriptor;
 use futures::stream::StreamExt;
 use prost::Message;
 use prost_reflect::{
-    prost_types::FileDescriptorProto, DescriptorPool, DynamicMessage, MessageDescriptor,
+    DescriptorPool, DynamicMessage, MessageDescriptor, prost_types::FileDescriptorProto,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tonic::transport::{Channel, Endpoint};
 use tonic_reflection::pb::v1::{
-    server_reflection_client::ServerReflectionClient, server_reflection_request::MessageRequest,
-    server_reflection_response::MessageResponse, ServerReflectionRequest,
+    ServerReflectionRequest, server_reflection_client::ServerReflectionClient,
+    server_reflection_request::MessageRequest, server_reflection_response::MessageResponse,
 };
 
 // Descriptor cache to avoid repeated resolution of the same symbols and files
@@ -319,13 +319,13 @@ impl GrpcReflectionClient {
 
                 // Add all new file descriptors to the global cache
                 for descriptor in file_descriptors.iter() {
-                    if let Some(name) = &descriptor.name {
-                        if !cache.processed_files.contains(name) {
-                            cache.processed_files.insert(name.clone());
-                            cache
-                                .file_descriptors
-                                .insert(name.clone(), descriptor.clone());
-                        }
+                    if let Some(name) = &descriptor.name
+                        && !cache.processed_files.contains(name)
+                    {
+                        cache.processed_files.insert(name.clone());
+                        cache
+                            .file_descriptors
+                            .insert(name.clone(), descriptor.clone());
                     }
                 }
             }
@@ -367,27 +367,29 @@ impl GrpcReflectionClient {
             .context(format!("Failed to fetch file descriptor for {file_name}"))?
             .into_inner();
 
-        if let Some(response_result) = stream.next().await {
-            let response = response_result?;
-            if let Some(MessageResponse::FileDescriptorResponse(file_response)) =
-                response.message_response
-            {
-                // Collect and return decoded FileDescriptorProto objects
-                let descriptors = file_response
-                    .file_descriptor_proto
-                    .iter()
-                    .map(|bytes| {
-                        FileDescriptorProto::decode(bytes.as_slice())
-                            .context("Failed to decode file descriptor")
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-
-                // Add the file descriptors to the global cache for future use
+        match stream.next().await {
+            Some(response_result) => {
+                let response = response_result?;
+                if let Some(MessageResponse::FileDescriptorResponse(file_response)) =
+                    response.message_response
                 {
-                    let mut cache = self.descriptor_cache.write().unwrap();
-                    for descriptor in &descriptors {
-                        if let Some(name) = &descriptor.name {
-                            if !cache.processed_files.contains(name) {
+                    // Collect and return decoded FileDescriptorProto objects
+                    let descriptors = file_response
+                        .file_descriptor_proto
+                        .iter()
+                        .map(|bytes| {
+                            FileDescriptorProto::decode(bytes.as_slice())
+                                .context("Failed to decode file descriptor")
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+
+                    // Add the file descriptors to the global cache for future use
+                    {
+                        let mut cache = self.descriptor_cache.write().unwrap();
+                        for descriptor in &descriptors {
+                            if let Some(name) = &descriptor.name
+                                && !cache.processed_files.contains(name)
+                            {
                                 cache.processed_files.insert(name.clone());
                                 cache
                                     .file_descriptors
@@ -396,33 +398,36 @@ impl GrpcReflectionClient {
                             }
                         }
                     }
-                }
 
-                Ok(descriptors)
-            } else if let Some(MessageResponse::ErrorResponse(error)) = response.message_response {
-                tracing::error!(
-                    "Server returned error for file '{}': {} (code: {})",
-                    file_name,
-                    error.error_message,
-                    error.error_code
-                );
+                    Ok(descriptors)
+                } else if let Some(MessageResponse::ErrorResponse(error)) =
+                    response.message_response
+                {
+                    tracing::error!(
+                        "Server returned error for file '{}': {} (code: {})",
+                        file_name,
+                        error.error_message,
+                        error.error_code
+                    );
+                    Err(anyhow::anyhow!(
+                        "Error response from server when fetching {}: {} (code: {})",
+                        file_name,
+                        error.error_message,
+                        error.error_code
+                    ))
+                } else {
+                    Err(anyhow::anyhow!(
+                        "Unexpected response type from reflection API"
+                    ))
+                }
+            }
+            _ => {
+                tracing::error!("No response from reflection API for file '{}'", file_name);
                 Err(anyhow::anyhow!(
-                    "Error response from server when fetching {}: {} (code: {})",
-                    file_name,
-                    error.error_message,
-                    error.error_code
-                ))
-            } else {
-                Err(anyhow::anyhow!(
-                    "Unexpected response type from reflection API"
+                    "No response from server when fetching {}",
+                    file_name
                 ))
             }
-        } else {
-            tracing::error!("No response from reflection API for file '{}'", file_name);
-            Err(anyhow::anyhow!(
-                "No response from server when fetching {}",
-                file_name
-            ))
         }
     }
 
@@ -1386,7 +1391,9 @@ mod tests {
                     pool.get_message_by_name("news_aggregator.data.RssChannelData");
 
                 if rss_item_data.is_some() && rss_channel_data.is_some() {
-                    tracing::info!("✓ All expected message types found - nested dependencies resolved correctly");
+                    tracing::info!(
+                        "✓ All expected message types found - nested dependencies resolved correctly"
+                    );
                 } else {
                     tracing::warn!("Some expected message types missing:");
                     if rss_item_data.is_none() {
