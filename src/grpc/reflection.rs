@@ -527,7 +527,7 @@ impl GrpcReflectionClient {
         let descriptor = self.get_message_descriptor(message_name).await?;
 
         // Use ProtobufDescriptor's json_to_message method
-        ProtobufDescriptor::json_to_message(descriptor, json_str)
+        ProtobufDescriptor::json_to_message(descriptor, json_str, true)
             .context("Failed to convert JSON to message")
     }
 
