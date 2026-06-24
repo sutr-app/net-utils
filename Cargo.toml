@@ -12,6 +12,7 @@ default = []
 [dependencies]
 
 anyhow = "1.0"
+atom_syndication = { version = "0.12", default-features = false }
 async-trait = "0.1"
 axum = { version = "0.8" }
 bytes = { version = "1" }
